@@ -31,7 +31,7 @@ def get_first_instance(study_uid, series_uid):
 
 def download_dicom_file(study_uid, series_uid, instance_uid, save_path):
     # Note the added /file at the end for actual DICOM file download
-    file_url = f"{BASE_URL}/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/file"
+    file_url = f"{BASE_URL}/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}"
     # Use Accept header application/dicom to avoid 406
     print(f"Downloading DICOM file from {file_url}")
     headers = {"Accept": "application/dicom; transfer-syntax=*"}
