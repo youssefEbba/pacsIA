@@ -56,7 +56,7 @@ def interpret_with_gemini(instance_uid):
     Réponds uniquement en français.
     """
     
-    model = genai.GenerativeModel("gemini-pro")
+    model = genai.GenerativeModel("gemini-2.0")
     response = model.generate_content(prompt)
     
     return response.text
