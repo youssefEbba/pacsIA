@@ -34,7 +34,7 @@ def download_dicom_file(study_uid, series_uid, instance_uid, save_path):
     file_url = f"{BASE_URL}/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}"
     # Use Accept header application/dicom to avoid 406
     print(f"Downloading DICOM file from {file_url}")
-    headers = {"Accept": "application/dicom"}
+    headers = {"Accept":  "*/*"}
     response = requests.get(file_url, headers=headers)
     if response.status_code == 200:
         with open(save_path, "wb") as f:
