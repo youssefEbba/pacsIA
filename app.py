@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import google.generativeai as genai
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 app = Flask(__name__)
 
@@ -49,11 +50,15 @@ def download_dicom_file(study_uid, series_uid, instance_uid, save_path):
 
 # Get interpretation from Gemini in French
 def interpret_with_gemini(instance_uid):
-    prompt = f"""Je vous fournis l'identifiant d'une instance DICOM : {instance_uid}.
-Veuillez fournir une interprétation médicale possible de cette image basée sur cet identifiant.
-Faites comme si vous étiez un radiologue. Répondez en français."""
+    prompt = f"""
+    Voici l'identifiant d'une instance DICOM : {instance_uid}.
+    Donne-moi une interprétation médicale hypothétique de cette instance comme si tu étais un radiologue.
+    Réponds uniquement en français.
+    """
     
+    model = genai.GenerativeModel("gemini-pro")
     response = model.generate_content(prompt)
+    
     return response.text
 
 @app.route('/process-dicom', methods=['POST'])
