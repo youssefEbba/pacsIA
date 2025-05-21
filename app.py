@@ -1,30 +1,27 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 import requests
-import pydicom
-import cv2
-import numpy as np
 import os
-import uuid
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 🔁 Get the first SeriesInstanceUID from the Study
-def get_first_series(dicom_url):
-    series_url = f"{dicom_url}/series"
-    response = requests.get(series_url, headers={"Accept": "application/json"})
+# Base PACS API URL (adjust if needed)
+BASE_URL = "http://94.130.160.188:8080/dcm4chee-arc/aets/DCM4CHEE/rs"
+
+def get_first_series(study_uid):
+    url = f"{BASE_URL}/studies/{study_uid}/series"
+    # Use Accept header application/dicom+json to avoid 406
+    response = requests.get(url, headers={"Accept": "application/dicom+json"})
     if response.status_code != 200:
         raise Exception(f"Failed to fetch series: {response.status_code}")
     series_list = response.json()
     if not series_list:
         raise Exception("No series found in study")
+    # Depending on your PACS JSON structure, this may need adjusting
     return series_list[0]['0020000E']['Value'][0]  # SeriesInstanceUID
 
-# 🔁 Get the first SOPInstanceUID from the Series
-def get_first_instance(dicom_url, series_uid):
-    instance_url = f"{dicom_url}/series/{series_uid}/instances"
-    response = requests.get(instance_url, headers={"Accept": "application/json"})
+def get_first_instance(study_uid, series_uid):
+    url = f"{BASE_URL}/studies/{study_uid}/series/{series_uid}/instances"
+    response = requests.get(url, headers={"Accept": "application/dicom+json"})
     if response.status_code != 200:
         raise Exception(f"Failed to fetch instances: {response.status_code}")
     instances = response.json()
@@ -32,9 +29,9 @@ def get_first_instance(dicom_url, series_uid):
         raise Exception("No instances found in series")
     return instances[0]['00080018']['Value'][0]  # SOPInstanceUID
 
-# 📥 Download a DICOM instance
-def download_dicom_file(study_uid, series_uid, instance_uid, base_url, save_path):
-    file_url = f"{base_url}/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}"
+def download_dicom_file(study_uid, series_uid, instance_uid, save_path):
+    # Note the added /file at the end for actual DICOM file download
+    file_url = f"{BASE_URL}/studies/{study_uid}/series/{series_uid}/instances/{instance_uid}/file"
     headers = {"Accept": "application/dicom; transfer-syntax=*"}
     response = requests.get(file_url, headers=headers)
     if response.status_code == 200:
@@ -44,56 +41,44 @@ def download_dicom_file(study_uid, series_uid, instance_uid, base_url, save_path
     else:
         raise Exception(f"Failed to download DICOM file: {response.status_code}")
 
-# 🖼️ Convert DICOM to PNG
-def dicom_to_png(dicom_path, png_path):
-    ds = pydicom.dcmread(dicom_path)
-    arr = ds.pixel_array
-    img = cv2.convertScaleAbs(arr, alpha=255.0 / arr.max())
-    cv2.imwrite(png_path, img)
-    return png_path
-
-# 🚀 Main endpoint
-@app.route("/process-dicom", methods=["POST"])
+@app.route('/process-dicom', methods=['POST'])
 def process_dicom():
     data = request.get_json()
-    dicom_url = data.get("dicom_url")
-    if not dicom_url:
-        return jsonify({"error": "Missing dicom_url"}), 400
+    if not data or 'dicom_url' not in data:
+        return jsonify({"error": "Missing dicom_url in request"}), 400
+
+    dicom_url = data['dicom_url']
+
+    # Extract Study Instance UID from URL
+    # Example URL: http://.../studies/{studyUID}
+    try:
+        study_uid = dicom_url.rstrip('/').split('/')[-1]
+    except Exception:
+        return jsonify({"error": "Invalid dicom_url format"}), 400
 
     try:
-        # Extract Study UID from URL
-        study_uid = dicom_url.split("/")[-1]
-        base_url = "/".join(dicom_url.split("/")[:6])  # http://host:port/dcm4chee-arc/aets/DCM4CHEE/rs
+        series_uid = get_first_series(study_uid)
+        instance_uid = get_first_instance(study_uid, series_uid)
+        save_path = f"/tmp/{instance_uid}.dcm"
+        download_dicom_file(study_uid, series_uid, instance_uid, save_path)
 
-        # Get Series & Instance UIDs
-        series_uid = get_first_series(dicom_url)
-        instance_uid = get_first_instance(dicom_url, series_uid)
+        # Dummy interpretation - replace with your AI model call
+        interpretation = f"Interpretation of DICOM instance {instance_uid}"
 
-        # Download actual DICOM file
-        unique_name = str(uuid.uuid4())
-        dicom_path = os.path.join(UPLOAD_FOLDER, unique_name + ".dcm")
-        png_path = os.path.join(UPLOAD_FOLDER, unique_name + ".png")
-
-        download_dicom_file(study_uid, series_uid, instance_uid, base_url, dicom_path)
-        dicom_to_png(dicom_path, png_path)
+        # Optionally remove the file after processing
+        if os.path.exists(save_path):
+            os.remove(save_path)
 
         return jsonify({
-            "message": "DICOM processed successfully",
-            "image_url": f"/image/{unique_name}.png",
-            "prompt": "This is a medical image extracted from a DICOM file. Please analyze and provide a radiologist-style interpretation."
+            "study_uid": study_uid,
+            "series_uid": series_uid,
+            "instance_uid": instance_uid,
+            "interpretation": interpretation
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 🖼️ Serve image
-@app.route("/image/<filename>")
-def get_image(filename):
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    if not os.path.exists(file_path):
-        return jsonify({"error": "Image not found"}), 404
-    return send_file(file_path, mimetype="image/png")
-
-# ▶️ Run server
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    # Run on all interfaces, port 5000
+    app.run(host='0.0.0.0', port=5000)
